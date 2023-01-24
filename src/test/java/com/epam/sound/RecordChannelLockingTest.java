@@ -1,11 +1,8 @@
-package com.epam.asr;
+package com.epam.sound;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 
@@ -16,90 +13,83 @@ import javax.sound.sampled.Mixer;
 import javax.sound.sampled.TargetDataLine;
 import javax.swing.JFileChooser;
 import javax.swing.SwingUtilities;
+import javax.swing.filechooser.FileSystemView;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
+/**
+ * Demonstrates breaking TargetDataLines:
+ * after subsequently using AudioSystem, JFileChooser and locking/ unlocking screen,
+ * any recording attempt fails with LineUnavailableException.
+ * OS: Windows, Java: 17, 19.0.2
+ * The issue somehow relates to ShellFolders usage in the JFileChooser, so disabling it solves the problem.
+ * Other workaround is creating a JFileChooser before using AudioSystem.
+ * UI Thread usage in the tests were added since it somehow resolved the issue in our complex app setup,
+ * but it doesn't help in the provided tests.
+ */
 @Disabled // manual tests
 class RecordChannelLockingTest {
 
-  public static final String EXIT_COMMAND = "q";
-  public static final String FILE_CHOOSER_COMMAND = "f";
-  public static final String RECORDING_COMMAND = "r";
-
-  private final BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-
-  @Test // the only successful test
-  void shouldNotHangIfAccessedAfterFileChooser() {
-    filechooser();
-    System.out.println("breakpoint, lock / unlock screen before resuming");
-    assertDoesNotThrow(this::record);
-  }
-
-  @Test
+  @Test // fails
   void shouldNotHangIfAccessedBeforeFileChooser() {
     record();
-    filechooser();
+    fileChooser();
     System.out.println("breakpoint, lock / unlock screen before resuming");
     assertDoesNotThrow(this::record);
   }
 
-  @Test
+  @Test // successful
+  void shouldNotHangIfAccessedAfterFileChooser() {
+    fileChooser();
+    record();
+    System.out.println("breakpoint, lock / unlock screen before resuming");
+    assertDoesNotThrow(this::record);
+  }
+
+  @Test // successful
+  void shouldNotHangIfAccessedBeforeFileChooserWithDisabledShellFolders() {
+    record();
+    fileChooser(false);
+    System.out.println("breakpoint, lock / unlock screen before resuming");
+    assertDoesNotThrow(this::record);
+  }
+
+  @Test // fails
   void shouldNotHangInUiThread() throws InterruptedException, InvocationTargetException {
     SwingUtilities.invokeAndWait(() -> {
       record();
-      filechooser();
+      fileChooser();
       System.out.println("breakpoint, lock / unlock screen before resuming");
       assertDoesNotThrow(this::record);
     });
   }
 
-  @Test
+  @Test // fails
   void shouldNotHangInUiThreadSeparately() throws InterruptedException, InvocationTargetException {
     SwingUtilities.invokeAndWait(this::record);
-    SwingUtilities.invokeAndWait(this::filechooser);
+    SwingUtilities.invokeAndWait(this::fileChooser);
     System.out.println("breakpoint, lock / unlock screen before resuming");
     assertDoesNotThrow(() -> SwingUtilities.invokeAndWait(this::record));
   }
 
-  public static void main(String[] args) throws InterruptedException, InvocationTargetException {
-    new RecordChannelLockingTest().runManually();
+  void fileChooser() {
+    fileChooser(true);
   }
 
-  void runManually() throws InterruptedException, InvocationTargetException {
-    String line;
-    printHelp();
-    while (!EXIT_COMMAND.equals(line = readLine())) {
-      if (RECORDING_COMMAND.equals(line)) {
-        SwingUtilities.invokeAndWait(this::record);
-      } else if (FILE_CHOOSER_COMMAND.equals(line)) {
-        SwingUtilities.invokeAndWait(this::filechooser);
-      } else {
-        System.out.println("Unknown command: " + line);
-      }
-      printHelp();
-    }
-  }
-
-  private String readLine() {
-    try {
-      return reader.readLine();
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
-  }
-
-  private void printHelp() {
-    System.out.printf("Press %s to quit, %s to record, %s to create FileChooser.%n",
-      EXIT_COMMAND, RECORDING_COMMAND, FILE_CHOOSER_COMMAND);
-  }
-
-  private void filechooser() {
+  void fileChooser(boolean useShellFolder) {
     System.out.println("----");
-    System.out.println("File chooser created with hash " + new JFileChooser().hashCode());
+    JFileChooser fileChooser = new JFileChooser() {
+      @Override
+      protected void setup(FileSystemView view) {
+        super.setup(view);
+        putClientProperty("FileChooser.useShellFolder", useShellFolder);
+      }
+    };
+    System.out.println("File chooser created with hash " + fileChooser.hashCode());
     System.out.println("Thread: " + Thread.currentThread().getName());
   }
 
-  private void record() {
+  void record() {
     try {
       System.out.println("----");
       System.out.println("Recording...");
@@ -116,16 +106,16 @@ class RecordChannelLockingTest {
     }
   }
 
-  private Mixer getMixer() {
+  Mixer getMixer() {
     return Arrays.stream(AudioSystem.getMixerInfo())
       .map(AudioSystem::getMixer)
       .filter(this::isRecordingDevice)
-      .skip(1) // to skip the primary one
+      .skip(1) // to skip the primary driver and choose one directly
       .findAny()
       .orElseThrow();
   }
 
-  private boolean isRecordingDevice(Mixer mixer) {
+  boolean isRecordingDevice(Mixer mixer) {
     Line.Info[] lineInfos = mixer.getTargetLineInfo();
     return lineInfos.length > 0 && lineInfos[0].getLineClass() == TargetDataLine.class;
   }
