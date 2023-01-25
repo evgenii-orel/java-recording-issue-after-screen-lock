@@ -14,6 +14,7 @@ class RecordChannelLockingConsoleTest {
 
   public static final String EXIT_COMMAND = "q";
   public static final String FILE_CHOOSER_COMMAND = "f";
+  public static final String INIT_COM_COMMAND = "c";
   public static final String RECORDING_COMMAND = "r";
 
   private final static BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
@@ -27,6 +28,8 @@ class RecordChannelLockingConsoleTest {
         SwingUtilities.invokeAndWait(test::record);
       } else if (FILE_CHOOSER_COMMAND.equals(line)) {
         SwingUtilities.invokeAndWait(test::fileChooser);
+      } else if (INIT_COM_COMMAND.equals(line)) {
+        SwingUtilities.invokeAndWait(test::initCom);
       } else {
         System.out.println("Unknown command: " + line);
       }
